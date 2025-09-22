@@ -1,0 +1,42 @@
+[tool.poetry]
+name = "exchange-test"
+version = "0.1.0"
+description = "거래소 테스트 프로젝트"
+authors = ["Your Name <your.email@example.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+pandas = "^1.5.0"
+numpy = "^1.21.0"
+requests = "^2.28.0"
+websocket-client = "^1.4.0"
+rich = "^12.0.0"
+python-dotenv = "^0.19.0"
+schedule = "^1.2.0"
+pydantic = "^1.10.0"
+loguru = "^0.6.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.0.0"
+black = "^22.0.0"
+pylint = "^2.15.0"
+mypy = "^0.991"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 88
+target-version = ['py310']
+
+[tool.pylint]
+max-line-length = 88
+disable = ["C0114", "C0116"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
