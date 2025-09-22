@@ -1,0 +1,282 @@
+version: "3.9"
+
+services:
+  # Database
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: alt_exchange
+      POSTGRES_USER: alt_user
+      POSTGRES_PASSWORD: alt_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./deployments/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alt_user -d alt_exchange"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Kafka Message Broker
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: true
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # RabbitMQ for withdrawal queue
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: alt_user
+      RABBITMQ_DEFAULT_PASS: alt_password
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Keycloak Authentication
+  keycloak:
+    image: quay.io/keycloak/keycloak:23.0
+    command: ["start-dev"]
+    ports:
+      - "8080:8080"
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/alt_exchange
+      KC_DB_USERNAME: alt_user
+      KC_DB_PASSWORD: alt_password
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./deployments/keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json
+
+  # Kong API Gateway
+  kong-database:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: kong
+      POSTGRES_USER: kong
+      POSTGRES_PASSWORD: kong
+    volumes:
+      - kong_data:/var/lib/postgresql/data
+
+  kong-migration:
+    image: kong:3.4
+    depends_on:
+      - kong-database
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: kong-database
+      KONG_PG_DATABASE: kong
+      KONG_PG_USER: kong
+      KONG_PG_PASSWORD: kong
+    command: kong migrations bootstrap
+
+  kong:
+    image: kong:3.4
+    depends_on:
+      - kong-migration
+    ports:
+      - "8000:8000"
+      - "8443:8443"
+      - "8001:8001"
+      - "8444:8444"
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: kong-database
+      KONG_PG_DATABASE: kong
+      KONG_PG_USER: kong
+      KONG_PG_PASSWORD: kong
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  # ALT Exchange Services
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8001:8000"
+    environment:
+      - DATABASE_URL=postgresql://alt_user:alt_password@postgres:5432/alt_exchange
+      - REDIS_URL=redis://redis:6379
+      - KAFKA_BROKERS=kafka:9092
+      - KEYCLOAK_ISSUER=http://keycloak:8080/realms/alt-exchange
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+    volumes:
+      - ./src:/app/src
+    command: ["python", "-m", "alt_exchange.api.main"]
+
+  matching:
+    build:
+      context: .
+      dockerfile: Dockerfile.matching
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - KAFKA_BROKERS=kafka:9092
+    depends_on:
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./src:/app/src
+    command: ["python", "-m", "alt_exchange.services.matching.engine"]
+
+  market-data:
+    build:
+      context: .
+      dockerfile: Dockerfile.market-data
+    ports:
+      - "8765:8765"
+    environment:
+      - KAFKA_BROKERS=kafka:9092
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./src:/app/src
+    command: ["python", "-m", "alt_exchange.api.websocket"]
+
+  wallet:
+    build:
+      context: .
+      dockerfile: Dockerfile.wallet
+    environment:
+      - DATABASE_URL=postgresql://alt_user:alt_password@postgres:5432/alt_exchange
+      - RABBITMQ_URL=amqp://alt_user:alt_password@rabbitmq:5672
+      - BSC_WS_URL=wss://bsc-testnet.nodereal.io/ws/v1/YOUR_API_KEY
+      - ALT_CONTRACT_ADDRESS=0x...
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ./src:/app/src
+    command: ["python", "-m", "alt_exchange.services.wallet.service"]
+
+  admin:
+    build:
+      context: .
+      dockerfile: Dockerfile.admin
+    ports:
+      - "8002:8000"
+    environment:
+      - DATABASE_URL=postgresql://alt_user:alt_password@postgres:5432/alt_exchange
+      - KEYCLOAK_ISSUER=http://keycloak:8080/realms/alt-exchange
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+    volumes:
+      - ./src:/app/src
+    command: ["python", "-m", "alt_exchange.services.admin.api"]
+
+  # Monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deployments/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./deployments/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./deployments/grafana/datasources:/etc/grafana/provisioning/datasources
+
+volumes:
+  postgres_data:
+  redis_data:
+  kafka_data:
+  zookeeper_data:
+  rabbitmq_data:
+  kong_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  default:
+    name: alt-exchange-network

@@ -5,7 +5,8 @@ from decimal import Decimal
 from typing import List, Tuple
 
 from alt_exchange.core.enums import OrderStatus, OrderType, Side, TimeInForce
-from alt_exchange.core.events import OrderAccepted, OrderStatusChanged, TradeExecuted
+from alt_exchange.core.events import (OrderAccepted, OrderStatusChanged,
+                                      TradeExecuted)
 from alt_exchange.core.exceptions import InvalidOrderError
 from alt_exchange.core.models import Order, Trade
 from alt_exchange.infra.datastore import InMemoryDatabase
@@ -19,7 +20,9 @@ FEE_RATE = Decimal("0.001")
 class MatchingEngine:
     """Price-time priority matching engine for a single market."""
 
-    def __init__(self, market: str, db: InMemoryDatabase, event_bus: InMemoryEventBus) -> None:
+    def __init__(
+        self, market: str, db: InMemoryDatabase, event_bus: InMemoryEventBus
+    ) -> None:
         self.market = market
         self.db = db
         self.event_bus = event_bus
@@ -127,7 +130,9 @@ class MatchingEngine:
 
         if order.remaining() > 0:
             if order.time_in_force is TimeInForce.GTC:
-                order.status = OrderStatus.OPEN if order.filled == 0 else OrderStatus.PARTIAL
+                order.status = (
+                    OrderStatus.OPEN if order.filled == 0 else OrderStatus.PARTIAL
+                )
                 counter_side.add_order(order)
                 self.db.update_order(order)
                 self.event_bus.publish(
@@ -148,7 +153,9 @@ class MatchingEngine:
                 )
             elif order.time_in_force is TimeInForce.IOC:
                 # Cancel remaining quantity
-                order.status = OrderStatus.CANCELED if order.filled == 0 else OrderStatus.PARTIAL
+                order.status = (
+                    OrderStatus.CANCELED if order.filled == 0 else OrderStatus.PARTIAL
+                )
                 order.updated_at = datetime.now(timezone.utc)
                 self.db.update_order(order)
                 self.event_bus.publish(
@@ -199,7 +206,9 @@ class MatchingEngine:
             return resting_price <= order.price
         return resting_price >= order.price
 
-    def order_book_snapshot(self) -> Tuple[list[tuple[Decimal, Decimal]], list[tuple[Decimal, Decimal]]]:
+    def order_book_snapshot(
+        self,
+    ) -> Tuple[list[tuple[Decimal, Decimal]], list[tuple[Decimal, Decimal]]]:
         bids = list(self.bids.summary())
         asks = list(self.asks.summary())
         return bids, asks

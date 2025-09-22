@@ -5,16 +5,28 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Iterable, Optional
 
-from alt_exchange.core.enums import Asset, OrderStatus, OrderType, Side, TimeInForce, TransactionStatus, TransactionType
+from alt_exchange.core.enums import (Asset, OrderStatus, OrderType, Side,
+                                     TimeInForce, TransactionStatus,
+                                     TransactionType)
 from alt_exchange.core.events import BalanceChanged, OrderStatusChanged
-from alt_exchange.core.exceptions import EntityNotFoundError, InsufficientBalanceError, InvalidOrderError, SettlementError
-from alt_exchange.core.models import Account, Balance, Order, Trade, Transaction, User
-from alt_exchange.infra.datastore import InMemoryDatabase, UnitOfWork, copy_balance
+from alt_exchange.core.exceptions import (EntityNotFoundError,
+                                          InsufficientBalanceError,
+                                          InvalidOrderError, SettlementError)
+from alt_exchange.core.models import (Account, Balance, Order, Trade,
+                                      Transaction, User)
+from alt_exchange.infra.datastore import (InMemoryDatabase, UnitOfWork,
+                                          copy_balance)
 from alt_exchange.infra.event_bus import InMemoryEventBus
 from alt_exchange.services.matching.engine import FEE_RATE, MatchingEngine
 
+
 class AccountService:
-    def __init__(self, db: InMemoryDatabase, event_bus: InMemoryEventBus, matching_engine: MatchingEngine) -> None:
+    def __init__(
+        self,
+        db: InMemoryDatabase,
+        event_bus: InMemoryEventBus,
+        matching_engine: MatchingEngine,
+    ) -> None:
         self.db = db
         self.event_bus = event_bus
         self.matching = matching_engine
@@ -25,7 +37,9 @@ class AccountService:
     def create_user(self, email: str, password: str) -> User:
         password_hash = hashlib.sha256(password.encode()).hexdigest()
         with UnitOfWork(self.db) as uow:
-            user = User(id=self.db.next_id("users"), email=email, password_hash=password_hash)
+            user = User(
+                id=self.db.next_id("users"), email=email, password_hash=password_hash
+            )
             self.db.insert_user(user)
 
             account = Account(id=self.db.next_id("accounts"), user_id=user.id)
@@ -54,11 +68,15 @@ class AccountService:
         account = self.get_account(user_id)
         balance = self.db.find_balance(account.id, asset)
         if balance is None:
-            raise EntityNotFoundError(f"Balance for account {account.id} {asset.value} not found")
+            raise EntityNotFoundError(
+                f"Balance for account {account.id} {asset.value} not found"
+            )
         return balance
 
     # ------------------------------------------------------------------
-    def credit_deposit(self, user_id: int, asset: Asset, amount: Decimal, tx_hash: Optional[str] = None) -> Transaction:
+    def credit_deposit(
+        self, user_id: int, asset: Asset, amount: Decimal, tx_hash: Optional[str] = None
+    ) -> Transaction:
         account = self.get_account(user_id)
         now = datetime.now(timezone.utc)
         with UnitOfWork(self.db) as uow:
@@ -93,7 +111,9 @@ class AccountService:
         return tx
 
     # ------------------------------------------------------------------
-    def request_withdrawal(self, user_id: int, asset: Asset, amount: Decimal, address: str) -> Transaction:
+    def request_withdrawal(
+        self, user_id: int, asset: Asset, amount: Decimal, address: str
+    ) -> Transaction:
         account = self.get_account(user_id)
         now = datetime.now(timezone.utc)
         with UnitOfWork(self.db) as uow:
@@ -132,7 +152,9 @@ class AccountService:
         )
         return tx
 
-    def complete_withdrawal(self, tx_id: int, tx_hash: str, confirmations: int = 12) -> Transaction:
+    def complete_withdrawal(
+        self, tx_id: int, tx_hash: str, confirmations: int = 12
+    ) -> Transaction:
         tx = self.db.transactions.get(tx_id)
         if tx is None:
             raise EntityNotFoundError(f"Transaction {tx_id} not found")
@@ -187,7 +209,9 @@ class AccountService:
         with UnitOfWork(self.db) as uow:
             balance = self._ensure_balance(account.id, lock_asset)
             if balance.available < lock_required:
-                raise InsufficientBalanceError("Insufficient available balance for order")
+                raise InsufficientBalanceError(
+                    "Insufficient available balance for order"
+                )
 
             updated_balance = copy_balance(balance)
             updated_balance.available -= lock_required
@@ -228,6 +252,77 @@ class AccountService:
         self._rebalance_after_order(order)
         return order
 
+    def get_user_orders(
+        self, user_id: int, status: Optional[OrderStatus] = None
+    ) -> List[Order]:
+        """Get orders for a specific user"""
+        orders = []
+        for order in self.db.orders.values():
+            if order.user_id == user_id:
+                if status is None or order.status == status:
+                    orders.append(order)
+        return sorted(orders, key=lambda x: x.created_at, reverse=True)
+
+    def get_user_trades(self, user_id: int, limit: int = 100) -> List[Trade]:
+        """Get trades for a specific user"""
+        trades = []
+        for trade in self.db.trades.values():
+            # Check if user is involved in this trade
+            buy_order = self.db.orders.get(trade.buy_order_id)
+            sell_order = self.db.orders.get(trade.sell_order_id)
+
+            if (buy_order and buy_order.user_id == user_id) or (
+                sell_order and sell_order.user_id == user_id
+            ):
+                trades.append(trade)
+
+        return sorted(trades, key=lambda x: x.created_at, reverse=True)[:limit]
+
+    def cancel_order(self, user_id: int, order_id: int) -> bool:
+        """Cancel an order"""
+        order = self.db.orders.get(order_id)
+        if not order or order.user_id != user_id:
+            return False
+
+        if order.status not in {OrderStatus.OPEN, OrderStatus.PARTIAL}:
+            return False
+
+        # Update order status
+        order.status = OrderStatus.CANCELED
+        order.updated_at = datetime.now(timezone.utc)
+        self.db.update_order(order)
+
+        # Release locked funds
+        self._release_locked_funds(order)
+
+        # Publish event
+        self.event_bus.publish(
+            OrderStatusChanged(
+                order_id=order.id,
+                status=order.status,
+                filled=order.filled,
+                remaining=order.remaining(),
+                reason="user_canceled",
+            )
+        )
+
+        return True
+
+    def _release_locked_funds(self, order: Order):
+        """Release funds locked by an order"""
+        if order.side is Side.BUY:
+            asset = Asset.USDT
+            amount = order.remaining() * order.price * (Decimal("1") + FEE_RATE)
+        else:
+            asset = Asset.ALT
+            amount = order.remaining()
+
+        balance = self._ensure_balance(order.account_id, asset)
+        balance.locked -= amount
+        balance.available += amount
+        balance.updated_at = datetime.now(timezone.utc)
+        self.db.upsert_balance(balance)
+
     # ------------------------------------------------------------------
     def _settle_trades(self, trades: Iterable[Trade]) -> None:
         now = datetime.now(timezone.utc)
@@ -244,7 +339,9 @@ class AccountService:
 
                 # Buyer settlement
                 buy_quote = self._ensure_balance(buy_account.id, Asset.USDT)
-                buy_quote.locked -= self._lock_required(Side.BUY, trade.price, trade.amount)
+                buy_quote.locked -= self._lock_required(
+                    Side.BUY, trade.price, trade.amount
+                )
                 if buy_quote.locked < Decimal("0"):
                     raise SettlementError("Negative locked balance for buyer")
                 buy_quote.updated_at = now
@@ -326,7 +423,9 @@ class AccountService:
             uow.commit()
 
         # After settlement, ensure locked balances reflect unmatched quantity
-        touched_orders = {trade.buy_order_id for trade in trades} | {trade.sell_order_id for trade in trades}
+        touched_orders = {trade.buy_order_id for trade in trades} | {
+            trade.sell_order_id for trade in trades
+        }
         for order_id in touched_orders:
             self._rebalance_after_order(self.db.orders[order_id])
 
@@ -377,7 +476,10 @@ class AccountService:
         remaining = order.remaining()
         if order.status in {OrderStatus.CANCELED, OrderStatus.FILLED}:
             remaining = Decimal("0")
-        elif order.status is OrderStatus.PARTIAL and order.time_in_force is not TimeInForce.GTC:
+        elif (
+            order.status is OrderStatus.PARTIAL
+            and order.time_in_force is not TimeInForce.GTC
+        ):
             remaining = Decimal("0")
         if order.side is Side.BUY:
             price = order.price or Decimal("0")

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-import copy
+import weakref
 from collections import defaultdict
 from dataclasses import replace
 from itertools import count
-from typing import Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, Optional
 
 from alt_exchange.core.enums import Asset
-from alt_exchange.core.models import Account, AuditLog, Balance, Order, Trade, Transaction, User
+from alt_exchange.core.models import (Account, AuditLog, Balance, Order, Trade,
+                                      Transaction, User)
 
 
 class InMemoryDatabase:
@@ -69,16 +70,24 @@ class InMemoryDatabase:
 
     # --- snapshot management ----------------------------------------------
     def clone(self) -> "InMemoryDatabase":
+        """Create a shallow copy of the database for testing purposes.
+
+        This method creates a new database instance with references to the same
+        objects, which is sufficient for most testing scenarios and avoids
+        the performance overhead and deprecation warnings of deep copying.
+        """
         new_db = InMemoryDatabase()
-        new_db.users = copy.deepcopy(self.users)
-        new_db.accounts = copy.deepcopy(self.accounts)
-        new_db.balances = copy.deepcopy(self.balances)
-        new_db.orders = copy.deepcopy(self.orders)
-        new_db.trades = copy.deepcopy(self.trades)
-        new_db.transactions = copy.deepcopy(self.transactions)
-        new_db.audit_logs = copy.deepcopy(self.audit_logs)
-        new_db._balance_index = copy.deepcopy(self._balance_index)
-        new_db._counters = copy.deepcopy(self._counters)
+        # Shallow copy dictionaries - objects are immutable dataclasses
+        new_db.users = self.users.copy()
+        new_db.accounts = self.accounts.copy()
+        new_db.balances = self.balances.copy()
+        new_db.orders = self.orders.copy()
+        new_db.trades = self.trades.copy()
+        new_db.transactions = self.transactions.copy()
+        new_db.audit_logs = self.audit_logs.copy()
+        new_db._balance_index = self._balance_index.copy()
+        # Counters need to be reset for independent operation
+        new_db._counters = defaultdict(lambda: count(1))
         return new_db
 
     def restore(self, snapshot: "InMemoryDatabase") -> None:

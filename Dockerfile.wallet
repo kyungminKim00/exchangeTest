@@ -1,0 +1,29 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements
+COPY pyproject.toml poetry.lock ./
+
+# Install Poetry
+RUN pip install poetry
+
+# Configure Poetry
+RUN poetry config virtualenvs.create false
+
+# Install dependencies
+RUN poetry install --only=main --no-root
+
+# Copy source code
+COPY src/ ./src/
+
+# Set Python path
+ENV PYTHONPATH=/app/src
+
+# Run the wallet service
+CMD ["python", "-m", "alt_exchange.services.wallet.service"]

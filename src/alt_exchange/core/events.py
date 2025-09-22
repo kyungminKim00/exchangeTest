@@ -7,7 +7,7 @@ from typing import Optional
 from .enums import Asset, OrderStatus, Side
 
 
-@dataclass(slots=True)
+@dataclass
 class OrderAccepted:
     order_id: int
     market: str
@@ -15,7 +15,7 @@ class OrderAccepted:
     remaining: Decimal
 
 
-@dataclass(slots=True)
+@dataclass
 class TradeExecuted:
     trade_id: int
     market: str
@@ -26,7 +26,7 @@ class TradeExecuted:
     taker_side: Side
 
 
-@dataclass(slots=True)
+@dataclass
 class BalanceChanged:
     account_id: int
     asset: Asset
@@ -35,7 +35,7 @@ class BalanceChanged:
     reason: str
 
 
-@dataclass(slots=True)
+@dataclass
 class OrderStatusChanged:
     order_id: int
     status: OrderStatus

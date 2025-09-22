@@ -5,19 +5,11 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
-from .enums import (
-    AccountStatus,
-    Asset,
-    OrderStatus,
-    OrderType,
-    Side,
-    TimeInForce,
-    TransactionStatus,
-    TransactionType,
-)
+from .enums import (AccountStatus, Asset, OrderStatus, OrderType, Side,
+                    TimeInForce, TransactionStatus, TransactionType)
 
 
-@dataclass(slots=True)
+@dataclass
 class User:
     id: int
     email: str
@@ -26,7 +18,7 @@ class User:
     last_login: Optional[datetime] = None
 
 
-@dataclass(slots=True)
+@dataclass
 class Account:
     id: int
     user_id: int
@@ -34,7 +26,7 @@ class Account:
     kyc_level: int = 0
 
 
-@dataclass(slots=True)
+@dataclass
 class Balance:
     id: int
     account_id: int
@@ -44,7 +36,7 @@ class Balance:
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
-@dataclass(slots=True)
+@dataclass
 class Order:
     id: int
     user_id: int
@@ -64,7 +56,7 @@ class Order:
         return self.amount - self.filled
 
 
-@dataclass(slots=True)
+@dataclass
 class Trade:
     id: int
     buy_order_id: int
@@ -78,7 +70,7 @@ class Trade:
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
-@dataclass(slots=True)
+@dataclass
 class Transaction:
     id: int
     user_id: int
@@ -93,7 +85,7 @@ class Transaction:
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
-@dataclass(slots=True)
+@dataclass
 class AuditLog:
     id: int
     actor: str

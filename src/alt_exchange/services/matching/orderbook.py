@@ -9,7 +9,7 @@ from typing import Deque, Dict, Generator, Iterable, Optional, Tuple
 from alt_exchange.core.models import Order
 
 
-@dataclass(slots=True)
+@dataclass
 class PriceLevel:
     price: Decimal
     orders: Deque[Order]

@@ -19,11 +19,19 @@ class WalletService:
         # Deterministic fake address for tests
         return f"0xDEADBEEF{user_id:04d}"
 
-    def simulate_deposit(self, user_id: int, asset: Asset, amount: Decimal, tx_hash: str | None = None) -> Transaction:
-        return self.account_service.credit_deposit(user_id=user_id, asset=asset, amount=amount, tx_hash=tx_hash)
+    def simulate_deposit(
+        self, user_id: int, asset: Asset, amount: Decimal, tx_hash: str | None = None
+    ) -> Transaction:
+        return self.account_service.credit_deposit(
+            user_id=user_id, asset=asset, amount=amount, tx_hash=tx_hash
+        )
 
-    def request_withdrawal(self, user_id: int, asset: Asset, amount: Decimal, address: str) -> Transaction:
-        tx = self.account_service.request_withdrawal(user_id=user_id, asset=asset, amount=amount, address=address)
+    def request_withdrawal(
+        self, user_id: int, asset: Asset, amount: Decimal, address: str
+    ) -> Transaction:
+        tx = self.account_service.request_withdrawal(
+            user_id=user_id, asset=asset, amount=amount, address=address
+        )
         self.pending_withdrawals[tx.id] = tx
         return tx
 
