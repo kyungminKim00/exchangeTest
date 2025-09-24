@@ -77,6 +77,51 @@ test-api-comprehensive:
 	@echo "Running comprehensive API tests..."
 	poetry run pytest tests/test_websocket_enhanced.py tests/test_api_enhanced.py tests/test_websocket_server_integration.py tests/test_api_main_coverage.py -v --cov=src/alt_exchange/api --cov-report=term --cov-report=html
 
+test-database:
+	@echo "Running database abstraction tests..."
+	poetry run pytest tests/test_database_abstraction.py -v --cov=src/alt_exchange/infra/database --cov-report=term
+
+test-database-performance:
+	@echo "Running database performance tests..."
+	poetry run pytest tests/test_database_performance.py -v --cov=src/alt_exchange/infra/database --cov-report=term
+
+test-database-integration:
+	@echo "Running database integration tests..."
+	poetry run pytest tests/test_database_integration.py -v --cov=src/alt_exchange/infra/database --cov-report=term
+
+test-database-stress:
+	@echo "Running database stress tests..."
+	poetry run pytest tests/test_database_stress.py -v --cov=src/alt_exchange/infra/database --cov-report=term
+
+test-database-all:
+	@echo "Running all database tests..."
+	poetry run pytest tests/test_database_*.py -v --cov=src/alt_exchange/infra/database --cov-report=term --cov-report=html
+
+test-postgres:
+	@echo "Testing PostgreSQL connection..."
+	@if [ -z "$$DATABASE_URL" ]; then \
+		echo "DATABASE_URL not set. Using default connection..."; \
+		export DATABASE_URL="postgresql://alt_user:alt_password@localhost:5432/alt_exchange"; \
+	fi; \
+	poetry run python -c "from alt_exchange.infra.database import DatabaseFactory; db = DatabaseFactory.create_database('postgres'); print('PostgreSQL connection successful!')"
+
+db-migrate:
+	@echo "Running database migrations..."
+	@if [ -z "$$DATABASE_URL" ]; then \
+		echo "DATABASE_URL not set. Using default connection..."; \
+		export DATABASE_URL="postgresql://alt_user:alt_password@localhost:5432/alt_exchange"; \
+	fi; \
+	poetry run python -c "from alt_exchange.infra.database import DatabaseFactory; db = DatabaseFactory.create_database('postgres'); print('Database schema created!')"
+
+db-reset:
+	@echo "Resetting database..."
+	docker-compose down postgres
+	docker volume rm exchangeTest_postgres_data || true
+	docker-compose up -d postgres
+	@echo "Waiting for PostgreSQL to be ready..."
+	@sleep 10
+	@echo "Database reset complete!"
+
 test-all:
 	@echo "Running all tests with coverage..."
 	poetry run pytest tests/ -v --cov=src/alt_exchange --cov-report=html --cov-report=term
@@ -166,6 +211,36 @@ restore:
 	@echo "Restoring database from backup..."
 	@read -p "Enter backup file name: " file; \
 	docker-compose exec -T postgres psql -U alt_user -d alt_exchange < $$file
+
+# Help command
+help:
+	@echo "Available commands:"
+	@echo "  install     - Install dependencies"
+	@echo "  test        - Run tests with coverage"
+	@echo "  test-api    - Test API endpoints"
+	@echo "  test-websocket - Test WebSocket functionality"
+	@echo "  test-database - Test database abstraction layer"
+	@echo "  test-database-performance - Test database performance"
+	@echo "  test-database-integration - Test database integration"
+	@echo "  test-database-stress - Test database stress scenarios"
+	@echo "  test-database-all - Run all database tests"
+	@echo "  test-postgres - Test PostgreSQL connection"
+	@echo "  test-all    - Run all tests"
+	@echo "  lint        - Run linting checks"
+	@echo "  format      - Format code with black and isort"
+	@echo "  clean       - Clean temporary files"
+	@echo "  up          - Start all services with docker-compose"
+	@echo "  down        - Stop all services"
+	@echo "  logs        - Show logs from all services"
+	@echo "  build       - Build all Docker images"
+	@echo "  migrate     - Run database migrations"
+	@echo "  db-migrate  - Run database schema creation"
+	@echo "  db-reset    - Reset database (WARNING: deletes all data)"
+	@echo "  db-shell    - Connect to database shell"
+	@echo "  api         - Start API server"
+	@echo "  websocket   - Start WebSocket server"
+	@echo "  metrics     - View Prometheus metrics"
+	@echo "  health      - Check service health"
 
 # Security scanning
 security:

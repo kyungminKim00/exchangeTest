@@ -1,21 +1,30 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Iterable, Optional
 
-from alt_exchange.core.enums import (Asset, OrderStatus, OrderType, Side,
-                                     TimeInForce, TransactionStatus,
-                                     TransactionType)
+from alt_exchange.core.enums import (
+    Asset,
+    OrderStatus,
+    OrderType,
+    Side,
+    TimeInForce,
+    TransactionStatus,
+    TransactionType,
+)
 from alt_exchange.core.events import BalanceChanged, OrderStatusChanged
-from alt_exchange.core.exceptions import (EntityNotFoundError,
-                                          InsufficientBalanceError,
-                                          InvalidOrderError, SettlementError)
-from alt_exchange.core.models import (Account, Balance, Order, Trade,
-                                      Transaction, User)
-from alt_exchange.infra.datastore import (InMemoryDatabase, UnitOfWork,
-                                          copy_balance)
+from alt_exchange.core.exceptions import (
+    EntityNotFoundError,
+    InsufficientBalanceError,
+    InvalidOrderError,
+    SettlementError,
+)
+from alt_exchange.core.models import Account, Balance, Order, Trade, Transaction, User
+from alt_exchange.infra.database.base import Database, UnitOfWork
+from alt_exchange.infra.database.in_memory import InMemoryUnitOfWork, copy_order
 from alt_exchange.infra.event_bus import InMemoryEventBus
 from alt_exchange.services.matching.engine import FEE_RATE, MatchingEngine
 
@@ -23,7 +32,7 @@ from alt_exchange.services.matching.engine import FEE_RATE, MatchingEngine
 class AccountService:
     def __init__(
         self,
-        db: InMemoryDatabase,
+        db: Database,
         event_bus: InMemoryEventBus,
         matching_engine: MatchingEngine,
     ) -> None:
@@ -36,7 +45,7 @@ class AccountService:
     # User & account lifecycle
     def create_user(self, email: str, password: str) -> User:
         password_hash = hashlib.sha256(password.encode()).hexdigest()
-        with UnitOfWork(self.db) as uow:
+        with InMemoryUnitOfWork(self.db) as uow:
             user = User(
                 id=self.db.next_id("users"), email=email, password_hash=password_hash
             )
@@ -79,7 +88,7 @@ class AccountService:
     ) -> Transaction:
         account = self.get_account(user_id)
         now = datetime.now(timezone.utc)
-        with UnitOfWork(self.db) as uow:
+        with InMemoryUnitOfWork(self.db) as uow:
             balance = self._ensure_balance(account.id, asset)
             balance.available += amount
             balance.updated_at = now
@@ -116,7 +125,7 @@ class AccountService:
     ) -> Transaction:
         account = self.get_account(user_id)
         now = datetime.now(timezone.utc)
-        with UnitOfWork(self.db) as uow:
+        with InMemoryUnitOfWork(self.db) as uow:
             balance = self._ensure_balance(account.id, asset)
             if balance.available < amount:
                 raise InsufficientBalanceError("Insufficient funds for withdrawal")
@@ -162,7 +171,7 @@ class AccountService:
             raise InvalidOrderError("Transaction is not a withdrawal")
 
         account = self.get_account(tx.user_id)
-        with UnitOfWork(self.db) as uow:
+        with InMemoryUnitOfWork(self.db) as uow:
             balance = self._ensure_balance(account.id, tx.asset)
             if balance.locked < tx.amount:
                 raise SettlementError("Locked balance lower than withdrawal amount")
@@ -206,14 +215,14 @@ class AccountService:
         lock_required = self._lock_required(side, price, amount)
         now = datetime.now(timezone.utc)
 
-        with UnitOfWork(self.db) as uow:
+        with InMemoryUnitOfWork(self.db) as uow:
             balance = self._ensure_balance(account.id, lock_asset)
             if balance.available < lock_required:
                 raise InsufficientBalanceError(
                     "Insufficient available balance for order"
                 )
 
-            updated_balance = copy_balance(balance)
+            updated_balance = replace(balance)
             updated_balance.available -= lock_required
             updated_balance.locked += lock_required
             updated_balance.updated_at = now
@@ -326,7 +335,7 @@ class AccountService:
     # ------------------------------------------------------------------
     def _settle_trades(self, trades: Iterable[Trade]) -> None:
         now = datetime.now(timezone.utc)
-        with UnitOfWork(self.db) as uow:
+        with InMemoryUnitOfWork(self.db) as uow:
             for trade in trades:
                 buy_order = self.db.orders[trade.buy_order_id]
                 sell_order = self.db.orders[trade.sell_order_id]

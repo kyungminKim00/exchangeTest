@@ -5,11 +5,10 @@ from decimal import Decimal
 from typing import List, Tuple
 
 from alt_exchange.core.enums import OrderStatus, OrderType, Side, TimeInForce
-from alt_exchange.core.events import (OrderAccepted, OrderStatusChanged,
-                                      TradeExecuted)
+from alt_exchange.core.events import OrderAccepted, OrderStatusChanged, TradeExecuted
 from alt_exchange.core.exceptions import InvalidOrderError
 from alt_exchange.core.models import Order, Trade
-from alt_exchange.infra.datastore import InMemoryDatabase
+from alt_exchange.infra.database.base import Database
 from alt_exchange.infra.event_bus import InMemoryEventBus
 
 from .orderbook import OrderBookSide
@@ -20,9 +19,7 @@ FEE_RATE = Decimal("0.001")
 class MatchingEngine:
     """Price-time priority matching engine for a single market."""
 
-    def __init__(
-        self, market: str, db: InMemoryDatabase, event_bus: InMemoryEventBus
-    ) -> None:
+    def __init__(self, market: str, db: Database, event_bus: InMemoryEventBus) -> None:
         self.market = market
         self.db = db
         self.event_bus = event_bus
