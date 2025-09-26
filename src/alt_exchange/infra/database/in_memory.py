@@ -10,15 +10,8 @@ from itertools import count
 from typing import List, Optional
 
 from alt_exchange.core.enums import Asset
-from alt_exchange.core.models import (
-    Account,
-    AuditLog,
-    Balance,
-    Order,
-    Trade,
-    Transaction,
-    User,
-)
+from alt_exchange.core.models import (Account, AuditLog, Balance, Order, Trade,
+                                      Transaction, User)
 from alt_exchange.infra.database.base import Database, UnitOfWork
 
 
@@ -57,6 +50,9 @@ class InMemoryDatabase(Database):
     def insert_account(self, account: Account) -> Account:
         self.accounts[account.id] = account
         return account
+
+    def update_account(self, account: Account) -> None:
+        self.accounts[account.id] = account
 
     def get_account(self, account_id: int) -> Optional[Account]:
         return self.accounts.get(account_id)
@@ -133,7 +129,7 @@ class InMemoryDatabase(Database):
         return [tx for tx in self.transactions.values() if tx.user_id == user_id]
 
     # Audit log operations
-    def insert_audit(self, audit_log: AuditLog) -> AuditLog:
+    def insert_audit_log(self, audit_log: AuditLog) -> AuditLog:
         self.audit_logs[audit_log.id] = audit_log
         return audit_log
 

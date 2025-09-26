@@ -7,8 +7,7 @@ Event = TypeVar("Event")
 
 
 class Subscriber(Protocol[Event]):
-    def __call__(self, event: Event) -> None:
-        ...
+    def __call__(self, event: Event) -> None: ...
 
 
 class InMemoryEventBus:

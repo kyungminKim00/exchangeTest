@@ -74,6 +74,23 @@ class OrderBookSide:
         level = self._levels[best_price]
         return level.orders[0] if level.orders else None
 
+    def remove_order(self, order: Order) -> bool:
+        """Remove a specific order from the order book."""
+        if order.price is None:
+            return False
+
+        level = self._levels.get(order.price)
+        if level is None:
+            return False
+
+        try:
+            level.orders.remove(order)
+            if not level.orders:
+                self._remove_price(order.price)
+            return True
+        except ValueError:
+            return False
+
     def summary(self) -> Iterable[Tuple[Decimal, Decimal]]:
         for level in self.iter_price_levels():
             total = sum(order.remaining() for order in level.orders)

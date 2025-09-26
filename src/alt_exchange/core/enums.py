@@ -21,6 +21,8 @@ class Side(str, Enum):
 class OrderType(str, Enum):
     LIMIT = "limit"
     MARKET = "market"
+    OCO = "oco"  # One-Cancels-the-Other
+    STOP = "stop"  # Stop-Limit order
 
 
 class OrderStatus(str, Enum):

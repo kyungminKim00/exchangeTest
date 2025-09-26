@@ -6,25 +6,19 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Iterable, Optional
 
-from alt_exchange.core.enums import (
-    Asset,
-    OrderStatus,
-    OrderType,
-    Side,
-    TimeInForce,
-    TransactionStatus,
-    TransactionType,
-)
+from alt_exchange.core.enums import (Asset, OrderStatus, OrderType, Side,
+                                     TimeInForce, TransactionStatus,
+                                     TransactionType)
 from alt_exchange.core.events import BalanceChanged, OrderStatusChanged
-from alt_exchange.core.exceptions import (
-    EntityNotFoundError,
-    InsufficientBalanceError,
-    InvalidOrderError,
-    SettlementError,
-)
-from alt_exchange.core.models import Account, Balance, Order, Trade, Transaction, User
+from alt_exchange.core.exceptions import (EntityNotFoundError,
+                                          InsufficientBalanceError,
+                                          InvalidOrderError, OrderLinkError,
+                                          SettlementError, StopOrderError)
+from alt_exchange.core.models import (Account, Balance, Order, Trade,
+                                      Transaction, User)
 from alt_exchange.infra.database.base import Database, UnitOfWork
-from alt_exchange.infra.database.in_memory import InMemoryUnitOfWork, copy_order
+from alt_exchange.infra.database.in_memory import (InMemoryUnitOfWork,
+                                                   copy_order)
 from alt_exchange.infra.event_bus import InMemoryEventBus
 from alt_exchange.services.matching.engine import FEE_RATE, MatchingEngine
 
@@ -206,6 +200,8 @@ class AccountService:
         time_in_force: TimeInForce = TimeInForce.GTC,
     ) -> Order:
         account = self.get_account(user_id)
+        if account.frozen:
+            raise InvalidOrderError("Account is frozen and cannot place orders")
         if amount <= 0:
             raise InvalidOrderError("Amount must be positive")
         if price <= 0:
@@ -261,6 +257,171 @@ class AccountService:
         self._rebalance_after_order(order)
         return order
 
+    def place_stop_order(
+        self,
+        user_id: int,
+        side: Side,
+        price: Decimal,
+        stop_price: Decimal,
+        amount: Decimal,
+        time_in_force: TimeInForce = TimeInForce.GTC,
+    ) -> Order:
+        """Place a stop-limit order."""
+        account = self.get_account(user_id)
+        if account.frozen:
+            raise InvalidOrderError("Account is frozen")
+
+        if amount <= 0:
+            raise InvalidOrderError("Amount must be positive")
+        if price <= 0:
+            raise InvalidOrderError("Price must be positive")
+        if stop_price is None or stop_price <= 0:
+            raise StopOrderError("Stop price must be positive")
+
+        lock_asset = Asset.USDT if side is Side.BUY else Asset.ALT
+        lock_required = self._lock_required(side, price, amount)
+        now = datetime.now(timezone.utc)
+
+        with InMemoryUnitOfWork(self.db) as uow:
+            balance = self._ensure_balance(account.id, lock_asset)
+            if balance.available < lock_required:
+                raise InsufficientBalanceError(
+                    "Insufficient available balance for order"
+                )
+
+            updated_balance = replace(balance)
+            updated_balance.available -= lock_required
+            updated_balance.locked += lock_required
+            updated_balance.updated_at = now
+            self.db.upsert_balance(updated_balance)
+
+            order = Order(
+                id=self.db.next_id("orders"),
+                user_id=user_id,
+                account_id=account.id,
+                market=self.market,
+                side=side,
+                type=OrderType.STOP,
+                time_in_force=time_in_force,
+                price=price,
+                amount=amount,
+                filled=Decimal("0"),
+                status=OrderStatus.OPEN,
+                stop_price=stop_price,
+            )
+            self.db.insert_order(order)
+            uow.commit()
+
+        self.event_bus.publish(
+            BalanceChanged(
+                account_id=account.id,
+                asset=lock_asset,
+                available=self.db.find_balance(account.id, lock_asset).available,
+                locked=self.db.find_balance(account.id, lock_asset).locked,
+                reason="order_lock",
+            )
+        )
+
+        trades = self.matching.submit(order)
+        if trades:
+            self._settle_trades(trades)
+
+        self._rebalance_after_order(order)
+        return order
+
+    def place_oco_order(
+        self,
+        user_id: int,
+        side: Side,
+        price: Decimal,
+        stop_price: Decimal,
+        amount: Decimal,
+        time_in_force: TimeInForce = TimeInForce.GTC,
+    ) -> tuple[Order, Order]:
+        """Place an OCO (One-Cancels-the-Other) order."""
+        account = self.get_account(user_id)
+        if account.frozen:
+            raise InvalidOrderError("Account is frozen")
+
+        if amount <= 0:
+            raise InvalidOrderError("Amount must be positive")
+        if price <= 0:
+            raise InvalidOrderError("Price must be positive")
+        if stop_price is None or stop_price <= 0:
+            raise OrderLinkError("Stop price must be positive")
+
+        lock_asset = Asset.USDT if side is Side.BUY else Asset.ALT
+        lock_required = self._lock_required(side, price, amount)
+        now = datetime.now(timezone.utc)
+
+        with InMemoryUnitOfWork(self.db) as uow:
+            balance = self._ensure_balance(account.id, lock_asset)
+            if balance.available < lock_required:
+                raise InsufficientBalanceError(
+                    "Insufficient available balance for order"
+                )
+
+            updated_balance = replace(balance)
+            updated_balance.available -= lock_required
+            updated_balance.locked += lock_required
+            updated_balance.updated_at = now
+            self.db.upsert_balance(updated_balance)
+
+            # Create main limit order
+            main_order = Order(
+                id=self.db.next_id("orders"),
+                user_id=user_id,
+                account_id=account.id,
+                market=self.market,
+                side=side,
+                type=OrderType.OCO,
+                time_in_force=time_in_force,
+                price=price,
+                amount=amount,
+                filled=Decimal("0"),
+                status=OrderStatus.OPEN,
+                stop_price=stop_price,
+                link_order_id=self.db.next_id("orders"),  # Will be the stop order ID
+            )
+
+            # Create stop order
+            stop_order = Order(
+                id=main_order.link_order_id,
+                user_id=user_id,
+                account_id=account.id,
+                market=self.market,
+                side=side,
+                type=OrderType.STOP,
+                time_in_force=time_in_force,
+                price=stop_price,
+                amount=amount,
+                filled=Decimal("0"),
+                status=OrderStatus.OPEN,
+                stop_price=stop_price,
+                link_order_id=main_order.id,
+            )
+
+            self.db.insert_order(main_order)
+            self.db.insert_order(stop_order)
+            uow.commit()
+
+        self.event_bus.publish(
+            BalanceChanged(
+                account_id=account.id,
+                asset=lock_asset,
+                available=self.db.find_balance(account.id, lock_asset).available,
+                locked=self.db.find_balance(account.id, lock_asset).locked,
+                reason="order_lock",
+            )
+        )
+
+        trades = self.matching.submit(main_order)
+        if trades:
+            self._settle_trades(trades)
+
+        self._rebalance_after_order(main_order)
+        return main_order, stop_order
+
     def get_user_orders(
         self, user_id: int, status: Optional[OrderStatus] = None
     ) -> List[Order]:
@@ -296,26 +457,14 @@ class AccountService:
         if order.status not in {OrderStatus.OPEN, OrderStatus.PARTIAL}:
             return False
 
-        # Update order status
-        order.status = OrderStatus.CANCELED
-        order.updated_at = datetime.now(timezone.utc)
-        self.db.update_order(order)
+        # Use matching engine's cancel_order method which handles OCO and stop orders
+        success = self.matching.cancel_order(order_id)
 
-        # Release locked funds
-        self._release_locked_funds(order)
+        if success:
+            # Release locked funds
+            self._release_locked_funds(order)
 
-        # Publish event
-        self.event_bus.publish(
-            OrderStatusChanged(
-                order_id=order.id,
-                status=order.status,
-                filled=order.filled,
-                remaining=order.remaining(),
-                reason="user_canceled",
-            )
-        )
-
-        return True
+        return success
 
     def _release_locked_funds(self, order: Order):
         """Release funds locked by an order"""

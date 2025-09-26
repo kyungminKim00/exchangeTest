@@ -1,1 +1,3 @@
-# Admin service for approval workflows and system management
+from .service import AdminService
+
+__all__ = ["AdminService"]

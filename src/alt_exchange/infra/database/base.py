@@ -8,15 +8,8 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Protocol, TypeVar
 
 from alt_exchange.core.enums import Asset
-from alt_exchange.core.models import (
-    Account,
-    AuditLog,
-    Balance,
-    Order,
-    Trade,
-    Transaction,
-    User,
-)
+from alt_exchange.core.models import (Account, AuditLog, Balance, Order, Trade,
+                                      Transaction, User)
 
 T = TypeVar("T")
 
@@ -49,6 +42,11 @@ class Database(ABC):
     @abstractmethod
     def insert_account(self, account: Account) -> Account:
         """Insert a new account"""
+        pass
+
+    @abstractmethod
+    def update_account(self, account: Account) -> None:
+        """Update an existing account"""
         pass
 
     @abstractmethod
@@ -142,7 +140,7 @@ class Database(ABC):
 
     # Audit log operations
     @abstractmethod
-    def insert_audit(self, audit_log: AuditLog) -> AuditLog:
+    def insert_audit_log(self, audit_log: AuditLog) -> AuditLog:
         """Insert a new audit log"""
         pass
 

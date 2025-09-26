@@ -212,11 +212,45 @@ restore:
 	@read -p "Enter backup file name: " file; \
 	docker-compose exec -T postgres psql -U alt_user -d alt_exchange < $$file
 
+# Quality assurance commands
+quality-check:
+	@echo "Running comprehensive quality checks..."
+	@echo "1. Code formatting check..."
+	black --check --diff src/ tests/
+	@echo "2. Import sorting check..."
+	isort --check-only --diff src/ tests/
+	@echo "3. Type checking..."
+	mypy src/ --ignore-missing-imports
+	@echo "4. Security scan..."
+	bandit -r src/ -f json -o bandit_report.json
+	@echo "5. Test coverage..."
+	python -m pytest tests/test_account_service.py tests/test_matching.py tests/test_wallet_service_edge_cases.py tests/test_new_order_types.py tests/test_admin_service.py tests/test_wallet_service_enhanced.py --cov=src/alt_exchange --cov-report=html --cov-report=term-missing
+	@echo "Quality check completed!"
+
+quality-fix:
+	@echo "Fixing code quality issues..."
+	@echo "1. Formatting code..."
+	black src/ tests/
+	@echo "2. Sorting imports..."
+	isort src/ tests/
+	@echo "3. Running tests..."
+	python -m pytest tests/test_account_service.py tests/test_matching.py tests/test_wallet_service_edge_cases.py tests/test_new_order_types.py tests/test_admin_service.py tests/test_wallet_service_enhanced.py -v
+	@echo "Quality fixes completed!"
+
+quality-report:
+	@echo "Generating quality report..."
+	@echo "Coverage report available at: htmlcov/index.html"
+	@echo "Security report available at: bandit_report.json"
+	@echo "Quality report generated!"
+
 # Help command
 help:
 	@echo "Available commands:"
 	@echo "  install     - Install dependencies"
 	@echo "  test        - Run tests with coverage"
+	@echo "  quality-check - Run comprehensive quality checks"
+	@echo "  quality-fix - Fix code quality issues automatically"
+	@echo "  quality-report - Generate quality reports"
 	@echo "  test-api    - Test API endpoints"
 	@echo "  test-websocket - Test WebSocket functionality"
 	@echo "  test-database - Test database abstraction layer"

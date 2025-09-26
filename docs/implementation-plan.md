@@ -3,7 +3,7 @@
 이 문서는 다중 언어/서비스로 구성된 원 설계를 현재 Python 중심의 실습/테스트 환경에 맞춰 축소·재구성한 실행 계획입니다. 개발자는 아래 범위를 기반으로 즉시 구현을 진행할 수 있으며, 추후 Rust/Node.js 마이크로서비스로의 확장이 가능하도록 계층을 나누었습니다.
 
 ## 1. 기술 스택 & 런타임
-- **언어**: Python 3.10 (Poetry 기반). Rust/Node 대신 Python으로 핵심 서비스를 모듈화.
+- **언어**: Python 3.12 (Poetry 기반). Rust/Node 대신 Python으로 핵심 서비스를 모듈화.
 - **프레임워크**: FastAPI(HTTP), Pydantic(스키마), uvicorn(개발 서버), SQLAlchemy + SQLite(로컬 트랜잭션 시뮬레이션), aiokafka/redis 대신 in-memory 이벤트 버스 및 캐시 스텁.
 - **메시징/캐시**: 표준 인터페이스 정의 후 InMemory 구현. 실제 환경 전환 시 Kafka/Redis 어댑터 추가만으로 확장 가능.
 - **DB**: SQLite + SQLAlchemy(테스트), PostgreSQL로 마이그레이션 가능한 마이그레이션 스크립트 템플릿 제공.

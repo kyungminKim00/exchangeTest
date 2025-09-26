@@ -16,3 +16,19 @@ class EntityNotFoundError(ExchangeError):
 
 class SettlementError(ExchangeError):
     """Raised when settlement operations fail."""
+
+
+class OrderLinkError(ExchangeError):
+    """Raised when OCO order linking operations fail."""
+
+
+class StopOrderError(ExchangeError):
+    """Raised when stop order operations fail."""
+
+
+class AdminPermissionError(ExchangeError):
+    """Raised when admin operations lack proper permissions."""
+
+
+class WithdrawalApprovalError(ExchangeError):
+    """Raised when withdrawal approval operations fail."""

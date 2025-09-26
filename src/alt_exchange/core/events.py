@@ -42,3 +42,57 @@ class OrderStatusChanged:
     filled: Decimal
     remaining: Decimal
     reason: Optional[str] = None
+
+
+@dataclass
+class StopOrderActivated:
+    order_id: int
+    market: str
+    stop_price: Decimal
+    activated_price: Decimal
+
+
+@dataclass
+class OCOOrderCancelled:
+    order_id: int
+    linked_order_id: int
+    reason: str
+
+
+@dataclass
+class WithdrawalRequested:
+    transaction_id: int
+    user_id: int
+    asset: Asset
+    amount: Decimal
+    address: str
+
+
+@dataclass
+class WithdrawalApproved:
+    transaction_id: int
+    approver_id: int
+    approved_at: str
+
+
+@dataclass
+class WithdrawalRejected:
+    transaction_id: int
+    approver_id: int
+    rejected_at: str
+    reason: str
+
+
+@dataclass
+class AccountFrozen:
+    account_id: int
+    user_id: int
+    frozen_by: int
+    reason: str
+
+
+@dataclass
+class AccountUnfrozen:
+    account_id: int
+    user_id: int
+    unfrozen_by: int

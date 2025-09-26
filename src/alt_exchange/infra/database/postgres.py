@@ -586,6 +586,42 @@ class PostgreSQLDatabase(Database):
             created_at=model.created_at,
         )
 
+    def insert_audit_log(self, audit_log: AuditLog) -> AuditLog:
+        """Insert audit log"""
+        with self.get_session() as session:
+            import json
+
+            db_audit = AuditLogModel(
+                id=audit_log.id,
+                actor=audit_log.actor,
+                action=audit_log.action,
+                entity=audit_log.entity,
+                entity_id=audit_log.entity_id,
+                metadata_json=(
+                    json.dumps(audit_log.metadata) if audit_log.metadata else None
+                ),
+                created_at=audit_log.created_at,
+            )
+            session.add(db_audit)
+            session.flush()
+            return audit_log
+
+    def update_account(self, account: Account) -> Account:
+        """Update account"""
+        with self.get_session() as session:
+            db_account = (
+                session.query(AccountModel)
+                .filter(AccountModel.id == account.id)
+                .first()
+            )
+            if db_account:
+                db_account.user_id = account.user_id
+                db_account.status = account.status
+                db_account.frozen = account.frozen
+                db_account.updated_at = datetime.now(timezone.utc)
+                return account
+            return None
+
 
 class PostgreSQLUnitOfWork(UnitOfWork):
     """PostgreSQL implementation of Unit of Work"""

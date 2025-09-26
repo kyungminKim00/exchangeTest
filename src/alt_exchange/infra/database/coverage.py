@@ -10,15 +10,8 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
 from alt_exchange.core.enums import Asset
-from alt_exchange.core.models import (
-    Account,
-    AuditLog,
-    Balance,
-    Order,
-    Trade,
-    Transaction,
-    User,
-)
+from alt_exchange.core.models import (Account, AuditLog, Balance, Order, Trade,
+                                      Transaction, User)
 from alt_exchange.infra.database.base import Database
 
 

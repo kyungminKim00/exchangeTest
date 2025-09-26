@@ -24,6 +24,7 @@ class Account:
     user_id: int
     status: AccountStatus = AccountStatus.ACTIVE
     kyc_level: int = 0
+    frozen: bool = False  # Additional freeze flag for admin control
 
 
 @dataclass
@@ -49,6 +50,8 @@ class Order:
     amount: Decimal
     filled: Decimal = Decimal("0")
     status: OrderStatus = OrderStatus.OPEN
+    stop_price: Optional[Decimal] = None  # For STOP and OCO orders
+    link_order_id: Optional[int] = None  # For OCO orders - links to paired order
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -82,6 +85,9 @@ class Transaction:
     confirmations: int
     amount: Decimal
     address: Optional[str]
+    approver_id: Optional[int] = None  # For withdrawal approval
+    approved_at: Optional[datetime] = None  # When approved
+    rejected_at: Optional[datetime] = None  # When rejected
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
