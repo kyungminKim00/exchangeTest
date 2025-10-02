@@ -16,9 +16,9 @@ class WalletService:
     def __init__(self, account_service: AccountService) -> None:
         self.account_service = account_service
         self.pending_withdrawals: Dict[int, Transaction] = {}
-        self.deposit_addresses: Dict[str, Dict] = (
-            {}
-        )  # address -> {user_id, asset, created_at}
+        self.deposit_addresses: Dict[
+            str, Dict
+        ] = {}  # address -> {user_id, asset, created_at}
         self.external_wallet_interface = ExternalWalletInterface()
 
     def generate_deposit_address(self, user_id: int, asset: Asset) -> str:
@@ -148,3 +148,13 @@ class ExternalWalletInterface:
                 random.randint(1000000, 2000000) if status == "confirmed" else None
             ),
         }
+
+    def get_transaction_by_id(self, tx_id: int) -> Transaction:
+        """Get transaction by ID"""
+        # Check pending withdrawals first
+        if tx_id in self.pending_withdrawals:
+            return self.pending_withdrawals[tx_id]
+
+        # For now, raise an exception if not found in pending withdrawals
+        # In a real implementation, this would query the database
+        raise Exception(f"Transaction {tx_id} not found")

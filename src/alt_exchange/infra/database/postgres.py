@@ -6,43 +6,19 @@ from __future__ import annotations
 
 import logging
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from typing import List, Optional
 
-from sqlalchemy import (
-    Boolean,
-    Column,
-    DateTime,
-    Enum,
-    ForeignKey,
-    Integer,
-    Numeric,
-    String,
-    Text,
-    create_engine,
-    func,
-)
+from sqlalchemy import (Boolean, Column, DateTime, Enum, ForeignKey, Integer,
+                        Numeric, String, Text, create_engine, func)
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 from sqlalchemy.orm.exc import NoResultFound
 
-from alt_exchange.core.enums import (
-    AccountStatus,
-    Asset,
-    OrderStatus,
-    OrderType,
-    Side,
-    TimeInForce,
-    TransactionStatus,
-    TransactionType,
-)
-from alt_exchange.core.models import (
-    Account,
-    AuditLog,
-    Balance,
-    Order,
-    Trade,
-    Transaction,
-    User,
-)
+from alt_exchange.core.enums import (AccountStatus, Asset, OrderStatus,
+                                     OrderType, Side, TimeInForce,
+                                     TransactionStatus, TransactionType)
+from alt_exchange.core.models import (Account, AuditLog, Balance, Order, Trade,
+                                      Transaction, User)
 from alt_exchange.infra.database.base import Database, UnitOfWork
 
 logger = logging.getLogger(__name__)

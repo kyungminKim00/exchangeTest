@@ -41,6 +41,8 @@ class MatchingEngine:
             return self._submit_oco_order(order)
         elif order.type == OrderType.LIMIT:
             return self._submit_limit_order(order)
+        elif order.type == OrderType.MARKET:
+            return self._submit_market_order(order)
         else:
             raise InvalidOrderError(f"Order type {order.type} not supported")
 
@@ -194,6 +196,118 @@ class MatchingEngine:
                     status=order.status,
                     filled=order.filled,
                     remaining=order.remaining(),
+                )
+            )
+
+        return trades
+
+    def _submit_market_order(self, order: Order) -> List[Trade]:
+        """Submit a market order to the matching engine."""
+        # Market orders execute immediately at the best available price
+        trades: List[Trade] = []
+        book_to_match = self.asks if order.side is Side.BUY else self.bids
+
+        while order.remaining() > 0:
+            best_order = book_to_match.peek_best_order()
+            if best_order is None:
+                break
+
+            # Execute trade at the best available price
+            trade_amount = min(order.remaining(), best_order.remaining())
+            trade_price = best_order.price
+
+            # Create trade
+            trade = Trade(
+                id=self.db.next_id("trades"),
+                buy_order_id=order.id if order.side is Side.BUY else best_order.id,
+                sell_order_id=best_order.id if order.side is Side.BUY else order.id,
+                maker_order_id=best_order.id,
+                taker_order_id=order.id,
+                taker_side=order.side,
+                price=trade_price,
+                amount=trade_amount,
+                fee=trade_amount * FEE_RATE,
+            )
+
+            trades.append(trade)
+
+            # Update order fills
+            order.filled += trade_amount
+            best_order.filled += trade_amount
+
+            # Update order status and remove from book if filled
+            if best_order.remaining() <= 0:
+                best_order.status = OrderStatus.FILLED
+                best_order.updated_at = datetime.now(timezone.utc)
+                self.db.update_order(best_order)
+                book_to_match.pop_best_order()
+
+                self.event_bus.publish(
+                    OrderStatusChanged(
+                        order_id=best_order.id,
+                        status=best_order.status,
+                        filled=best_order.filled,
+                        remaining=best_order.remaining(),
+                        reason="Filled by market order",
+                    )
+                )
+            else:
+                # Partial fill - update the order
+                best_order.updated_at = datetime.now(timezone.utc)
+                self.db.update_order(best_order)
+
+                self.event_bus.publish(
+                    OrderStatusChanged(
+                        order_id=best_order.id,
+                        status=best_order.status,
+                        filled=best_order.filled,
+                        remaining=best_order.remaining(),
+                        reason="Partially filled by market order",
+                    )
+                )
+
+        # Update market order status
+        if order.remaining() <= 0:
+            order.status = OrderStatus.FILLED
+        else:
+            # Market order couldn't be fully filled - cancel remaining
+            order.status = OrderStatus.CANCELED
+
+        order.updated_at = datetime.now(timezone.utc)
+        self.db.update_order(order)
+
+        # Publish events
+        self.event_bus.publish(
+            OrderAccepted(
+                order_id=order.id,
+                market=self.market,
+                side=order.side,
+                remaining=order.remaining(),
+            )
+        )
+
+        self.event_bus.publish(
+            OrderStatusChanged(
+                order_id=order.id,
+                status=order.status,
+                filled=order.filled,
+                remaining=order.remaining(),
+                reason="Market order execution",
+            )
+        )
+
+        # Publish trade events
+        for trade in trades:
+            self.db.insert_trade(trade)
+            self.event_bus.publish(
+                TradeExecuted(
+                    trade_id=trade.id,
+                    market=self.market,
+                    maker_order_id=trade.maker_order_id,
+                    taker_order_id=trade.taker_order_id,
+                    taker_side=trade.taker_side,
+                    price=trade.price,
+                    amount=trade.amount,
                 )
             )
 

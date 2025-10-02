@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+from typing import Optional
 
 from alt_exchange.infra.database import DatabaseFactory
+from alt_exchange.infra.database.base import Database
 from alt_exchange.infra.event_bus import InMemoryEventBus
 from alt_exchange.services.account.service import AccountService
 from alt_exchange.services.admin.service import AdminService
@@ -11,11 +13,19 @@ from alt_exchange.services.matching.engine import MatchingEngine
 from alt_exchange.services.wallet.service import WalletService
 
 
-def build_application_context(market: str = "ALT/USDT") -> dict:
+def build_application_context(
+    market: str = "ALT/USDT",
+    db: Optional[Database] = None,
+    event_bus: Optional[InMemoryEventBus] = None,
+) -> dict:
     """Creates a fully wired service graph for tests or interactive sessions."""
-    # Use database factory to create appropriate database instance
-    db = DatabaseFactory.create_database()
-    bus = InMemoryEventBus()
+    # Use provided instances or create new ones
+    if db is None:
+        db = DatabaseFactory.create_database()
+    if event_bus is None:
+        bus = InMemoryEventBus()
+    else:
+        bus = event_bus
     matching = MatchingEngine(market=market, db=db, event_bus=bus)
     account = AccountService(db=db, event_bus=bus, matching_engine=matching)
     wallet = WalletService(account_service=account)

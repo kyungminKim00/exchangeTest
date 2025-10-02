@@ -67,6 +67,33 @@ class AccountService:
                 return account
         raise EntityNotFoundError(f"Account for user {user_id} not found")
 
+    def create_account(self, user_id: int) -> Account:
+        """Create a new account for an existing user"""
+        with InMemoryUnitOfWork(self.db) as uow:
+            account = Account(id=self.db.next_id("accounts"), user_id=user_id)
+            self.db.insert_account(account)
+
+            # Create balances for all assets
+            for asset in Asset:
+                balance = Balance(
+                    id=self.db.next_id("balances"),
+                    account_id=account.id,
+                    asset=asset,
+                    available=Decimal("0"),
+                    locked=Decimal("0"),
+                )
+                self.db.upsert_balance(balance)
+            uow.commit()
+        return account
+
+    def get_accounts_by_user(self, user_id: int) -> List[Account]:
+        """Get all accounts for a user"""
+        accounts = []
+        for account in self.db.accounts.values():
+            if account.user_id == user_id:
+                accounts.append(account)
+        return accounts
+
     def get_balance(self, user_id: int, asset: Asset) -> Balance:
         account = self.get_account(user_id)
         balance = self.db.find_balance(account.id, asset)
@@ -199,6 +226,36 @@ class AccountService:
         amount: Decimal,
         time_in_force: TimeInForce = TimeInForce.GTC,
     ) -> Order:
+        """Place a limit order with validation and balance locking."""
+        account = self._validate_order_request(user_id, amount, price)
+        lock_asset, lock_required = self._calculate_order_requirements(
+            side, price, amount
+        )
+
+        order = self._create_and_lock_order(
+            account,
+            user_id,
+            side,
+            price,
+            amount,
+            time_in_force,
+            lock_asset,
+            lock_required,
+        )
+
+        self._publish_balance_change_event(account.id, lock_asset, "order_lock")
+
+        trades = self.matching.submit(order)
+        if trades:
+            self._settle_trades(trades)
+
+        self._rebalance_after_order(order)
+        return order
+
+    def _validate_order_request(
+        self, user_id: int, amount: Decimal, price: Decimal
+    ) -> Account:
+        """Validate order request parameters and account status."""
         account = self.get_account(user_id)
         if account.frozen:
             raise InvalidOrderError("Account is frozen and cannot place orders")
@@ -206,9 +263,28 @@ class AccountService:
             raise InvalidOrderError("Amount must be positive")
         if price <= 0:
             raise InvalidOrderError("Price must be positive")
+        return account
 
+    def _calculate_order_requirements(
+        self, side: Side, price: Decimal, amount: Decimal
+    ) -> tuple[Asset, Decimal]:
+        """Calculate the asset to lock and amount required for the order."""
         lock_asset = Asset.USDT if side is Side.BUY else Asset.ALT
         lock_required = self._lock_required(side, price, amount)
+        return lock_asset, lock_required
+
+    def _create_and_lock_order(
+        self,
+        account: Account,
+        user_id: int,
+        side: Side,
+        price: Decimal,
+        amount: Decimal,
+        time_in_force: TimeInForce,
+        lock_asset: Asset,
+        lock_required: Decimal,
+    ) -> Order:
+        """Create order and lock required balance."""
         now = datetime.now(timezone.utc)
 
         with InMemoryUnitOfWork(self.db) as uow:
@@ -218,11 +294,7 @@ class AccountService:
                     "Insufficient available balance for order"
                 )
 
-            updated_balance = replace(balance)
-            updated_balance.available -= lock_required
-            updated_balance.locked += lock_required
-            updated_balance.updated_at = now
-            self.db.upsert_balance(updated_balance)
+            self._lock_balance(balance, lock_required, now)
 
             order = Order(
                 id=self.db.next_id("orders"),
@@ -239,23 +311,32 @@ class AccountService:
             )
             self.db.insert_order(order)
             uow.commit()
+            return order
 
+    def _lock_balance(
+        self, balance: Balance, lock_required: Decimal, now: datetime
+    ) -> None:
+        """Lock the required amount from available balance."""
+        updated_balance = replace(balance)
+        updated_balance.available -= lock_required
+        updated_balance.locked += lock_required
+        updated_balance.updated_at = now
+        self.db.upsert_balance(updated_balance)
+
+    def _publish_balance_change_event(
+        self, account_id: int, asset: Asset, reason: str
+    ) -> None:
+        """Publish balance change event."""
+        balance = self.db.find_balance(account_id, asset)
         self.event_bus.publish(
             BalanceChanged(
-                account_id=account.id,
-                asset=lock_asset,
-                available=self.db.find_balance(account.id, lock_asset).available,
-                locked=self.db.find_balance(account.id, lock_asset).locked,
-                reason="order_lock",
+                account_id=account_id,
+                asset=asset,
+                available=balance.available,
+                locked=balance.locked,
+                reason=reason,
             )
         )
-
-        trades = self.matching.submit(order)
-        if trades:
-            self._settle_trades(trades)
-
-        self._rebalance_after_order(order)
-        return order
 
     def place_stop_order(
         self,

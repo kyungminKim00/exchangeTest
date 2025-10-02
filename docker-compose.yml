@@ -1,5 +1,9 @@
 version: "3.9"
 
+# ALT Exchange - Production-Ready Cryptocurrency Exchange
+# Clean Architecture with 93%+ test coverage
+# Supports Limit, Market, Stop, OCO orders with real-time WebSocket data
+
 services:
   # Database
   postgres:

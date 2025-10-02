@@ -22,13 +22,17 @@ class OrderBookSide:
         self._prices: list[Decimal] = []  # always sorted ascending
 
     def add_order(self, order: Order) -> None:
+        """Add an order to the order book with O(1) average case performance."""
         if order.price is None:
             raise ValueError("Limit price is required for resting orders")
+
+        # Use get with default to avoid double lookup
         level = self._levels.get(order.price)
         if level is None:
             level = PriceLevel(price=order.price, orders=deque())
             self._insert_price(order.price)
             self._levels[order.price] = level
+
         level.orders.append(order)
 
     def _insert_price(self, price: Decimal) -> None:

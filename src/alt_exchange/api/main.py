@@ -47,6 +47,31 @@ def get_context():
 
 
 # Pydantic models for API
+class UserCreateRequest(BaseModel):
+    email: str = Field(..., description="User email address")
+    password: str = Field(
+        ..., min_length=8, description="User password (min 8 characters)"
+    )
+
+
+class UserResponse(BaseModel):
+    id: int
+    email: str
+    created_at: str
+
+
+class AccountCreateRequest(BaseModel):
+    user_id: int = Field(..., description="User ID to create account for")
+
+
+class AccountResponse(BaseModel):
+    id: int
+    user_id: int
+    status: str
+    kyc_level: int
+    frozen: bool
+
+
 class OrderRequest(BaseModel):
     market: str = Field(..., example="ALT/USDT")
     side: Side
@@ -170,6 +195,73 @@ async def get_current_admin_id() -> int:
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "service": "alt-exchange-api"}
+
+
+@app.post("/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+async def create_user(user_request: UserCreateRequest):
+    """Create a new user"""
+    context = get_context()
+    account_service = context["account_service"]
+
+    try:
+        user = account_service.create_user(user_request.email, user_request.password)
+        return UserResponse(
+            id=user.id, email=user.email, created_at=user.created_at.isoformat()
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to create user: {str(e)}",
+        )
+
+
+@app.post(
+    "/accounts", response_model=AccountResponse, status_code=status.HTTP_201_CREATED
+)
+async def create_account(account_request: AccountCreateRequest):
+    """Create a new account for a user"""
+    context = get_context()
+    account_service = context["account_service"]
+
+    try:
+        account = account_service.create_account(account_request.user_id)
+        return AccountResponse(
+            id=account.id,
+            user_id=account.user_id,
+            status=account.status.value,
+            kyc_level=account.kyc_level,
+            frozen=account.frozen,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to create account: {str(e)}",
+        )
+
+
+@app.get("/accounts/{user_id}", response_model=List[AccountResponse])
+async def get_user_accounts(user_id: int):
+    """Get all accounts for a user"""
+    context = get_context()
+    account_service = context["account_service"]
+
+    try:
+        accounts = account_service.get_accounts_by_user(user_id)
+        return [
+            AccountResponse(
+                id=account.id,
+                user_id=account.user_id,
+                status=account.status.value,
+                kyc_level=account.kyc_level,
+                frozen=account.frozen,
+            )
+            for account in accounts
+        ]
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Failed to get accounts: {str(e)}",
+        )
 
 
 @app.post("/orders", response_model=OrderResponse, status_code=status.HTTP_201_CREATED)
@@ -367,6 +459,34 @@ async def request_withdrawal(
 
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@app.get("/withdrawals/{tx_id}", response_model=WithdrawalResponse)
+async def get_withdrawal_status(
+    tx_id: int, user_id: int = Depends(get_current_user_id)
+):
+    """Get withdrawal status by transaction ID"""
+    context = get_context()
+    wallet_service = context["wallet_service"]
+
+    try:
+        transaction = wallet_service.get_transaction_by_id(tx_id)
+        if transaction.user_id != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied to this transaction",
+            )
+
+        return WithdrawalResponse(
+            id=transaction.id,
+            status=transaction.status.value,
+            tx_hash=transaction.tx_hash,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Withdrawal not found: {str(e)}",
+        )
 
 
 @app.get("/deposit-address/{asset}", response_model=DepositAddressResponse)
